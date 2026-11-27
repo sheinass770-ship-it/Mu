@@ -20,7 +20,7 @@ const GROQ_MODEL = process.env.GROQ_SEARCH_MODEL || 'openai/gpt-oss-120b';
 const HAS_SEARCH = GROQ_KEYS.length > 0;
 // Jamendo: free music API (full songs, free license); register at developer.jamendo.com for a client id
 const JAMENDO_ID = String(process.env.JAMENDO_CLIENT_ID || '').trim();
-const JAMENDO_BASE = process.env.JAMENDO_BASE || '                            ';
+const JAMENDO_BASE = (process.env.JAMENDO_BASE || '                            ').trim().replace(/\/+$/, '');
 // songs can be searched with Jamendo or, as a backup, with the web search of Groq
 const HAS_FOUND = !!JAMENDO_ID || HAS_SEARCH;
 const TEXT_MODEL = String(process.env.TEXT_MODEL || '').trim() || 'gemini-3.6-flash';
@@ -868,7 +868,7 @@ function endCall(id) {
 
 // spoken status messages while the answer is being prepared
 const WAIT_MSG = sp('חכה שנייה');
-const SEARCH_MSG = sp('חכה שנייה מחפש במקורות המאושרים');
+const SEARCH_MSG = sp('חכה שנייה מחפש מידע');
 // returns a short read= that plays the next status message, or '' when there is nothing new to say
 function statusMsg(s) {
   let msg = '';
