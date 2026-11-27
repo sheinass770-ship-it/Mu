@@ -14,3 +14,4 @@
   },
   "description": "Kav AI (קו AI): Hebrew voice AI line for Yemot HaMashiach, powered by Gemini"
 }
+"googleapis": "^140.0.0"
