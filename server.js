@@ -20,7 +20,7 @@ const GROQ_MODEL = process.env.GROQ_SEARCH_MODEL || 'openai/gpt-oss-120b';
 const HAS_SEARCH = GROQ_KEYS.length > 0;
 // Jamendo: free music API (full songs, free license); register at developer.jamendo.com for a client id
 const JAMENDO_ID = String(process.env.JAMENDO_CLIENT_ID || '').trim();
-const JAMENDO_BASE = process.env.JAMENDO_BASE || 'https://api.jamendo.com/v3.0';
+const JAMENDO_BASE = process.env.JAMENDO_BASE || '                            ';
 // songs can be searched with Jamendo or, as a backup, with the web search of Groq
 const HAS_FOUND = !!JAMENDO_ID || HAS_SEARCH;
 const TEXT_MODEL = String(process.env.TEXT_MODEL || '').trim() || 'gemini-3.6-flash';
@@ -46,9 +46,23 @@ const REC_MAX = String(parseInt(process.env.REC_MAX, 10) || 30);
 // Yemot cannot read these characters inside t- text, and , = break the read= syntax
 const sp = s => String(s).replace(/[.\-"'&|,=]/g, ' ').replace(/\s+/g, ' ').trim();
 
+// approved domains for Chabad Chassidut sources-only extension (extendable via CHABAD_SOURCES env var)
+const CHABAD_SOURCES = String(process.env.CHABAD_SOURCES || 'chabadlibrary.org,lahak.org')
+  .split(',')
+  .map(s => s.replace(/^https?:\/\//i, '').replace(/\/+$/, '').trim())
+  .filter(Boolean);
+
+const CHABAD_STRICT_RULES = [
+  'אתה עונה אך ורק על סמך המקורות המאושרים הבאים: ' + CHABAD_SOURCES.join(', ') + '.',
+  'אסור בהחלט להמציא תשובות, לשער או להשלים מידע מידע כללי, מזיכרון או ממקורות חיצוניים שאינם ברשימה המאושרת.',
+  'אם לא נמצא מקור מפורש ומבוסס בתוך המקורות המאושרים לשאלה, אמור בפשטות ובברור שאין לך מקור מאושר לכך בתוך המקורות המוגדרים, ואל תמציא תשובה.',
+  'בכל תשובה שמבוססת על מקור, ציין תמיד במפורש את המקור שנמצא (שם הספר, המאמר או השיחה והמקום), בלי להקריא כתובות קישור ארוכות.'
+].join(' ');
+
 // the user can change the voice or pace by speaking; the model signals it with a tag that the server strips before read-aloud
 const VOICE_CTL = ' אם המשתמש מבקש לשנות את הקול, את קצב הדיבור או את אורך התשובות, התחל את התשובה בתג מתאים ואחריו אשר בקצרה במשפט אחד. התגים: [[VOICE:male]] לקול גברי, [[VOICE:female]] לקול נשי, [[VOICE:default]] לקול הרגיל, [[PACE:slow]] לדיבור לאט, [[PACE:fast]] לדיבור מהר, [[PACE:normal]] לקצב רגיל, [[LEN:short]] כשהמשתמש מבקש תשובות קצרות יותר, למשל: קצר את התשובה, תקצר, תענה קצר, בקצרה, בקיצור, [[LEN:long]] כשהוא מבקש לחזור לתשובות מפורטות או להרחיב. בקשה כזאת מתייחסת תמיד לאורך התשובות שלך ולא לחפץ או לנושא כלשהו, גם כשהיא מופיעה באותו משפט עם שאלה, ואז ענה על השאלה בקצרה. בקשת המשתמש לגבי אורך התשובה גוברת על כל הנחיית אורך אחרת, ולכן כבר בתשובה הזאת עצמה ענה לפי הבקשה החדשה, ואם יש בבקשה גם שאלה ענה עליה. אפשר לשלב כמה תגים. זה היוצא מן הכלל היחיד לכלל הסימנים המיוחדים. השתמש בתגים רק כשהמשתמש ביקש במפורש שינוי כזה, ולעולם אל תזכיר אותם בטקסט אחר.';
 const SEARCH_HINT = ' יש לך כלי חיפוש באינטרנט בשם web_search. הפעל אותו אך ורק אם המשתמש ביקש ממך במפורש לחפש באינטרנט או באתר מסוים, למשל חפש באינטרנט או חפש לי באתר. אם הוא ביקש אתר מסוים, העבר את שמו בשדה site. אם הוא לא ביקש חיפוש במפורש, ענה מהידע שלך בלי להשתמש בכלי, גם אם השאלה עוסקת בחדשות או בעניינים עדכניים ואתה לא בטוח בתשובה, ואז אמור בקצרה שאתה יכול לחפש אם יבקשו. אחרי החיפוש ענה בקצרה בלי להקריא כתובות אתרים.';
+const CHABAD_SEARCH_HINT = ' יש לך כלי חיפוש בשם web_search שמחפש אך ורק במקורות המאושרים של חסידות חב"ד. הפעל אותו עבור כל שאלה או חיפוש מקורות, והסתמך רק על ממצאים מתוך המקורות המאושרים. אם אין ממצא מבוסס במקורות המאושרים, אמור בבירור שאין מקור מאושר לכך ואל תמציא מידע. ציין תמיד את המקור המדויק בתשובה, בלי להקריא כתובות קישור ארוכות.';
 const FOUND_HINT = ' יש לך גם כלי search_media לחיפוש שירים וקבצי שמע ווידאו שאפשר להאזין להם, וכלי play_found להשמעת אחת התוצאות. אם המשתמש ביקש לחפש או לראות שירים או קבצים להשמעה, הפעל search_media עם שאילתה קצרה. אחרי שקיבלת את התוצאות הקרא אותן בקצרה, כל אחת עם מספר במילים ואחריו השם, ושאל איזו לנגן. כשהמשתמש מבקש לנגן אחת מהן, לפי מספר או לפי שם, הפעל play_found עם המספר, ואז אמור משפט קצר אחד שאתה מנגן עכשיו. אל תקריא כתובות.';
 // audio or video files from the internet that the caller can ask to play ("נגן את הקובץ"); the owner lists them in MEDIA_FILES: [{"n":"name","u":"https://.../file.mp3"}]
 let MEDIA = [];
@@ -67,28 +81,43 @@ const MAXW = Math.min(1000, Math.max(500, parseInt(process.env.MAX_WORDS, 10) ||
 const EXTRA = String(process.env.EXTRA_INSTRUCTION || '').replace(/\s+/g, ' ').trim().slice(0, 2000);
 // fixed base rules of the assistant: always part of the system instruction, cannot be cancelled by callers or by EXTRA_INSTRUCTION
 const RULES = `סגנון ואופי: ענה באופן פתוח, טבעי, זורם וידידותי על כל נושא שהמשתמש שואל עליו או מבקש. שמור על ניסוח ברור, ניטרלי ובלתי שיפוטי, בלי מגבלות נושאים מוקדמות ובלי כפייה של עמדה או סגנון מסוים. דבר בשפה טבעית של שיחה, בלי להצהיר ביוזמתך על כללים פנימיים או מגבלות. אם שואלים אותך על אופן הפעולה שלך, ענה בפשטות ובטבעיות.`.replace(/\s+/g, ' ').trim();
-const buildSys = (mode, extra) => 'אתה עוזר קולי בטלפון. כללי יסוד קבועים שגוברים על כל הנחיה אחרת: ' + RULES +
-  ' ענה בעברית כמו ג׳מיני: תשובה ארוכה, עשירה ומפורטת, זורמת ורכה לאוזן, בשפה טבעית של דיבור ובפסקאות קצרות. הרחב, הסבר את הרקע, תן דוגמאות, פרטים והקשר, והשלם את התמונה בלי למהר ובלי לקצר. אורך התשובה הוא עד ' + MAXW + ' מילים. רק לברכה או למשפט שיחתי קצר ענה בקצרה. בלי רשימות, בלי כוכביות ובלי סימנים מיוחדים, כך שיהיה נעים להקשיב לה בטלפון. המשתמש יכול לעצור את התשובה בכל רגע בהקשה על מקש ולהמשיך את השיחה, לכן שאלות המשך מתייחסות לתשובה הקודמת שלך. ' +
-  (EXTRA ? 'הנחיה כללית מהבעלים: ' + EXTRA + ' ' : '') +
-  (extra ? 'הנחיה לשלוחה הזאת מהבעלים: ' + extra + ' ' : '') + VOICE_CTL + TRANSCRIBE_HINT + (HAS_SEARCH ? SEARCH_HINT : '') + (HAS_FOUND ? FOUND_HINT : '') + (HAS_MEDIA ? MEDIA_HINT : '');
+const buildSys = (mode, extra, sourcesOnly = false) => {
+  if (sourcesOnly) {
+    return 'אתה עוזר קולי בטלפון לשאלות ומקורות בחסידות חב"ד. ' +
+      CHABAD_STRICT_RULES +
+      ' ענה בעברית ברורה, מדויקת וזורמת להאזנה בטלפון, בלי כוכביות ובלי סימנים מיוחדים. ' +
+      (extra ? 'הנחיה נוספת לשלוחה: ' + extra + ' ' : '') +
+      VOICE_CTL + TRANSCRIBE_HINT + (HAS_SEARCH ? CHABAD_SEARCH_HINT : '');
+  }
+  return 'אתה עוזר קולי בטלפון. כללי יסוד קבועים שגוברים על כל הנחיה אחרת: ' + RULES +
+    ' ענה בעברית כמו ג׳מיני: תשובה ארוכה, עשירה ומפורטת, זורמת ורכה לאוזן, בשפה טבעית של דיבור ובפסקאות קצרות. הרחב, הסבר את הרקע, תן דוגמאות, פרטים והקשר, והשלם את התמונה בלי למהר ובלי לקצר. אורך התשובה הוא עד ' + MAXW + ' מילים. רק לברכה או למשפט שיחתי קצר ענה בקצרה. בלי רשימות, בלי כוכביות ובלי סימנים מיוחדים, כך שיהיה נעים להקשיב לה בטלפון. המשתמש יכול לעצור את התשובה בכל רגע בהקשה על מקש ולהמשיך את השיחה, לכן שאלות המשך מתייחסות לתשובה הקודמת שלך. ' +
+    (EXTRA ? 'הנחיה כללית מהבעלים: ' + EXTRA + ' ' : '') +
+    (extra ? 'הנחיה לשלוחה הזאת מהבעלים: ' + extra + ' ' : '') + VOICE_CTL + TRANSCRIBE_HINT + (HAS_SEARCH ? SEARCH_HINT : '') + (HAS_FOUND ? FOUND_HINT : '') + (HAS_MEDIA ? MEDIA_HINT : '');
+};
 
 // one entry per Yemot extension: its own character mode, extra instruction and opening message
 let CFG = [];
 try { CFG = JSON.parse(process.env.EXTENSIONS || '[]'); } catch (e) { CFG = []; }
 if (!Array.isArray(CFG) || !CFG.length) CFG = [{ p: EXT, m: process.env.MODE || '2', x: '', g: process.env.GREETING || '' }];
+// ensure extension 3 exists as a Chabad sources-only extension if not explicitly defined in EXTENSIONS
+if (!CFG.some(c => String(c && c.p || '').replace(/^\/+|\/+$/g, '') === '3')) {
+  CFG.push({ p: '3', m: '2', x: '', g: 'שלוחת חסידות חב ד לפי מקורות מאושרים', sourcesOnly: true });
+}
 // one opening for both ways to ask: typing with the phone keys, or recording
 const DEFAULT_GREET = 'שלום וברכה';
 const EXTS = {};
 for (const c of CFG) {
   const p = String(c.p || '').replace(/^\/+|\/+$/g, '');
   if (!/^[0-9]+(\/[0-9]+)*$/.test(p)) continue;
+  const isSourcesOnly = !!c.sourcesOnly || p === '3';
   EXTS[p.replace(/\//g, '_')] = {
     p, d: '/' + p,
-    sys: buildSys(c.m, String(c.x || '').replace(/\s+/g, ' ').trim().slice(0, 1000)),
+    sourcesOnly: isSourcesOnly,
+    sys: buildSys(c.m, String(c.x || '').replace(/\s+/g, ' ').trim().slice(0, 1000), isSourcesOnly),
     g: sp(String(c.g || '').slice(0, 300)) || sp(DEFAULT_GREET)
   };
 }
-const EXT_FIRST = EXTS[Object.keys(EXTS)[0]] || { p: EXT, d: '/' + EXT, sys: buildSys('2', ''), g: sp(DEFAULT_GREET) };
+const EXT_FIRST = EXTS[Object.keys(EXTS)[0]] || { p: EXT, d: '/' + EXT, sourcesOnly: false, sys: buildSys('2', '', false), g: sp(DEFAULT_GREET) };
 const AGAIN = sp('לא שמעתי שאל שוב');
 const ERR = sp('הייתה תקלה נסו שוב');
 
@@ -181,24 +210,30 @@ async function textGen(body, deadline) {
 
 // Groq: the gpt-oss models search the web on the server side and answer with what they found
 let grot = 0;
-async function groqSearch(query, site, deadline) {
+async function groqSearch(query, site, deadline, sourcesOnly = false) {
   let last = 'groq search failed';
   for (let i = 0; i < GROQ_KEYS.length; i++) {
     const key = GROQ_KEYS[grot++ % GROQ_KEYS.length];
     try {
+      const sysPrompt = sourcesOnly
+        ? 'Search only within the approved domains provided. Return only factual findings that explicitly appear in those approved sources along with the exact source name (book, maamar, sicha, or page). Do not use outside general knowledge or guess. Keep it concise, plain text, no URLs.'
+        : 'Search the web and answer in at most 80 words, in plain text, with the facts only. No links and no citations.';
+      const userPrompt = sourcesOnly
+        ? 'Search ONLY across these approved sites: ' + CHABAD_SOURCES.join(', ') + '. Query: ' + query + '. Include the exact source name for each finding.'
+        : (site ? 'Look only at the website "' + site + '" (open it directly if you can). Request: ' + (query || 'the current main headlines') : query);
       const r = await http(GROQ_BASE, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
         body: JSON.stringify({
           model: GROQ_MODEL,
           messages: [
-            { role: 'system', content: 'Search the web and answer in at most 80 words, in plain text, with the facts only. No links and no citations.' },
-            { role: 'user', content: site ? 'Look only at the website "' + site + '" (open it directly if you can). Request: ' + (query || 'the current main headlines') : query }
+            { role: 'system', content: sysPrompt },
+            { role: 'user', content: userPrompt }
           ],
           tools: [{ type: 'browser_search' }],
           tool_choice: 'required',
           reasoning_effort: 'low',
-          max_completion_tokens: 700,
+          max_completion_tokens: 900,
           stream: false
         })
       }, 15000, deadline);
@@ -207,7 +242,7 @@ async function groqSearch(query, site, deadline) {
         const m = ((j.choices || [])[0] || {}).message || {};
         // drop citation markers such as 【2†L6-L10】
         const text = String(m.content || '').replace(/【[^】]*】/g, '').replace(/\s+/g, ' ').trim();
-        if (text) return { answer: text.slice(-1200), results: [] };
+        if (text) return { answer: text.slice(-1500), results: [] };
         last = 'groq empty answer';
         continue;
       }
@@ -222,18 +257,22 @@ async function groqSearch(query, site, deadline) {
   return { error: 'search unavailable' };
 }
 
-async function webSearch(query, site, deadline) {
+async function webSearch(query, site, deadline, s) {
   query = String(query || '').trim().slice(0, 300);
   site = String(site || '').trim().slice(0, 100);
   if (!query && !site) return { error: 'empty query' };
   if (!GROQ_KEYS.length) return { error: 'search unavailable' };
-  return groqSearch(query, site, deadline);
+  if (s && s.sourcesOnly) {
+    const lockedQuery = '(' + (query || site) + ') (' + CHABAD_SOURCES.map(d => 'site:' + d).join(' OR ') + ')';
+    return groqSearch(lockedQuery, CHABAD_SOURCES.join(', '), deadline, true);
+  }
+  return groqSearch(query, site, deadline, false);
 }
 
 const SEARCH_DECL = {
   name: 'web_search',
-  description: 'Search the web. Call ONLY when the user explicitly asked to search the web or a specific website. Returns a short answer.',
-  parameters: { type: 'OBJECT', properties: { query: { type: 'STRING', description: 'A short search query' }, site: { type: 'STRING', description: 'Optional: the website the user asked to look at, as spoken, such as N12 or ynet' } }, required: ['query'] }
+  description: 'Search the web or approved sources. Returns factual findings.',
+  parameters: { type: 'OBJECT', properties: { query: { type: 'STRING', description: 'A short search query' }, site: { type: 'STRING', description: 'Optional: the website to look at' } }, required: ['query'] }
 };
 
 const MEDIA_DECL = {
@@ -418,8 +457,8 @@ async function askModel(sys, contents, deadline, s) {
   const base = { systemInstruction: { parts: [{ text: sys }] } };
   const decls = [];
   if (HAS_SEARCH) decls.push(SEARCH_DECL);
-  if (HAS_FOUND) decls.push(FOUND_SEARCH_DECL, FOUND_PLAY_DECL);
-  if (HAS_MEDIA) decls.push(MEDIA_DECL);
+  if (HAS_FOUND && !(s && s.sourcesOnly)) decls.push(FOUND_SEARCH_DECL, FOUND_PLAY_DECL);
+  if (HAS_MEDIA && !(s && s.sourcesOnly)) decls.push(MEDIA_DECL);
   if (!decls.length) return textGen({ ...base, contents }, deadline);
   const tools = [{ functionDeclarations: decls }];
   for (let i = 0; i < 3; i++) {
@@ -443,7 +482,7 @@ async function askModel(sys, contents, deadline, s) {
       } else {
         console.log('search:', String(args.query || '').slice(0, 80));
         if (s) { s.searching = true; if (s.onSearch) s.onSearch(); }
-        out = await webSearch(args.query, args.site, deadline);
+        out = await webSearch(args.query, args.site, deadline, s);
       }
       resp.push({ functionResponse: { name: c.functionCall.name, response: out } });
     }
@@ -678,7 +717,7 @@ app.get('/', (q, r) => { r.set('Access-Control-Allow-Origin', '*'); r.send('ok')
 
 // ---------- shared helpers of the call flow ----------
 const idOf = q => String(q.ApiCallId || 'x').replace(/[^a-zA-Z0-9]/g, '').slice(-24) || 'x';
-const newSession = (d, sys, g, extra) => Object.assign({ d, sys, g, n: 0, hn: 0, mode: '', job: null, vc: '', pace: '', len: '', h: [], p: '', name: '', r: '', t: 0, e: crypto.randomBytes(3).toString('hex') }, extra || {});
+const newSession = (d, sys, g, extra) => Object.assign({ d, sys, g, n: 0, hn: 0, mode: '', job: null, vc: '', pace: '', len: '', sourcesOnly: false, h: [], p: '', name: '', r: '', t: 0, e: crypto.randomBytes(3).toString('hex') }, extra || {});
 
 // every turn uses a new parameter and file name, because Yemot accumulates parameters across requests
 // (s.e keeps the names unique even if this server restarted in the middle of a call)
@@ -696,18 +735,7 @@ const tapFor = (s, pre) => {
   return 'read=' + pre + '=' + s.p + ',no,1,1,7,No';
 };
 
-// ---------- asking: the caller either types the question with the phone keys or records it ----------
-// after the opening message (and after every answer) the line waits a few seconds for a key press:
-//   a key was pressed -> typing mode, nothing pressed -> the caller is asked to speak and the question is recorded
-// typing like an old phone: press the key as many times as the place of the letter on it: 7 = ר, 77 = ש, 777 = ת
-// the whole question is typed in one go and sent with # (Yemot ends the read when # is pressed)
-// 1 = between two letters on the same key, so the same letter can be typed twice: 3 1 3 = אא (a different key starts a new letter by itself: 3 7 = אר)
-// 11 = the digit 1; a digit is 5 presses of its key (44444 = 4); 0 = space, 00 = delete the last character
-// final letters (ך ם ן ף ץ) are added automatically at the end of a word
-// the same table as the keyboard of Yemot itself (final letters have their own presses: 55 = כ, 555 = ך, 5555 = ל)
 const KB_KEYS = { '3': 'אבג', '2': 'דהו', '6': 'זחט', '5': 'יכךל', '4': 'מםנן', '9': 'סעפף', '8': 'צץק', '7': 'רשת' };
-const KB_NAME = { 'א': 'אלף', 'ב': 'בית', 'ג': 'גימל', 'ד': 'דלת', 'ה': 'הא', 'ו': 'ואו', 'ז': 'זין', 'ח': 'חית', 'ט': 'טית', 'י': 'יוד', 'כ': 'כף', 'ל': 'למד', 'מ': 'מם', 'נ': 'נון', 'ס': 'סמך', 'ע': 'עין', 'פ': 'פא', 'צ': 'צדי', 'ק': 'קוף', 'ך': 'כף סופית', 'ם': 'מם סופית', 'ן': 'נון סופית', 'ף': 'פא סופית', 'ץ': 'צדי סופית', 'ר': 'ריש', 'ש': 'שין', 'ת': 'תו' };
-// how long the line waits for the next key while typing (the whole question is typed in one read)
 const KB_WAIT = Math.min(60, Math.max(3, parseInt(process.env.KBD_WAIT, 10) || 20));
 const KB_FINAL = { 'כ': 'ך', 'מ': 'ם', 'נ': 'ן', 'פ': 'ף', 'צ': 'ץ' };
 const KB_MORE = sp('לשאלה נוספת');
@@ -840,7 +868,7 @@ function endCall(id) {
 
 // spoken status messages while the answer is being prepared
 const WAIT_MSG = sp('חכה שנייה');
-const SEARCH_MSG = sp('חכה שנייה מחפש באינטרנט');
+const SEARCH_MSG = sp('חכה שנייה מחפש במקורות המאושרים');
 // returns a short read= that plays the next status message, or '' when there is nothing new to say
 function statusMsg(s) {
   let msg = '';
@@ -968,7 +996,6 @@ async function doTurn(s, q, id, T0, typed) {
 }
 
 // ---------- history: every question and answer is kept as a recording in the history extension of Yemot ----------
-// file names (letters and digits only): p<phone>c<8 chars of time>t<turn>q  question, ...t<turn>a  answer, p<phone>c<time>n  spoken name
 const HIST = String(process.env.HISTORY_EXT || '').replace(/^\/+|\/+$/g, '');
 const HD = /^[0-9]+(\/[0-9]+)*$/.test(HIST) ? '/' + HIST : '';
 const CONT_TURNS = 2; // how many of the last turns are given to Gemini when a saved conversation is continued
@@ -1036,7 +1063,6 @@ const dateOf = cid => {
 };
 const HMENU = sp('להשמעה הקש 1 להמשך השיחה הקש 2 למחיקה הקש 3 לשינוי שם הקש 4 לשיחה הבאה הקש 5 לשיחה הקודמת הקש 6 ליציאה הקש 0');
 
-// announces the current conversation (its spoken name, or its date) and asks what to do with it
 function showItem(s, intro) {
   const c = s.list[s.i];
   const msgs = [];
@@ -1054,7 +1080,6 @@ async function playConv(s) {
   const dl = Date.now() + 20000;
   for (const n of sortedTurns(c)) {
     if (c.turns[n].txt) {
-      // typed question: no recording, the Yemot voice reads the saved text
       let qt = '', at = '';
       try { [qt, at] = await Promise.all([downloadText(hName(s.ph, c.cid, 't' + n + 'q'), dl, HD), downloadText(hName(s.ph, c.cid, 't' + n + 'a'), dl, HD)]); } catch (e) { console.error('history text failed:', e.message); }
       msgs.push('t-' + sp('שאלה'), 't-' + (sp(qt) || sp('לא זמין')), 't-' + sp('תשובה'), 't-' + (sp(at) || sp('לא זמין')));
@@ -1067,7 +1092,6 @@ async function playConv(s) {
   return tapFor(s, msgs.join('.'));
 }
 
-// the last turns of the saved conversation are given to Gemini as recordings, then the caller keeps talking in the same conversation
 async function continueConv(s) {
   const c = s.list[s.i];
   const all = sortedTurns(c);
@@ -1138,13 +1162,6 @@ async function historyStep(s, q) {
 }
 
 // ---------- songs folder: music that plays while the answer is being prepared ----------
-// SONGS_EXT = the Yemot extension (folder) that holds the songs. The caller hears the songs of the folder from the moment the question
-// is sent until the answer is ready. Yemot cannot interrupt a playing file, so every song is cut into short pieces (SONG_SEG_SEC seconds)
-// and the server plays a few pieces at a time and checks again whether the answer is ready.
-// piece names (letters and digits only): hs<id>x<NNN> shared song, hp<phone>s<id>x<NNN> song of one caller.
-// a caller with songs of his own hears only them; everyone else hears the shared songs.
-// songs get into the folder in two ways: the page /songs (password SONGS_PASS), or any audio file dropped in the folder (it is cut automatically
-// and removed; a file named p<phone>_name.mp3 becomes a personal song).
 const SONGS = String(process.env.SONGS_EXT || '').replace(/^\/+|\/+$/g, '');
 const SD = /^[0-9]+(\/[0-9]+)*$/.test(SONGS) ? '/' + SONGS : '';
 const SONGS_PASS = String(process.env.SONGS_PASS || '');
@@ -1156,7 +1173,6 @@ const SONG_RE = 'h(?:p(\\d{7,15}))?s([0-9a-f]{6})x(\\d{3})\\.wav';
 const enc = encodeURIComponent;
 let songCache = { t: 0, tracks: new Map() };
 
-// reads the songs folder: the pieces grouped by song, and the files that were dropped there and still have to be cut
 async function songList(deadline) {
   const r = await http(YM + 'GetIVR2Dir?token=' + enc(TOKEN) + '&path=' + enc('ivr2:' + SD), {}, 10000, deadline);
   const j = await r.json().catch(() => ({}));
@@ -1174,7 +1190,6 @@ async function songList(deadline) {
   return { tracks, raw };
 }
 
-// the pieces the caller hears while waiting, in order (his own songs, else the shared ones); the list is cached for two minutes
 async function songsFor(ph) {
   if (!SD) return [];
   const now = Date.now();
@@ -1188,7 +1203,6 @@ async function songsFor(ph) {
   return use.flatMap(t => [...t.parts].sort());
 }
 
-// cuts an audio or video file into phone-format pieces and uploads them to the songs folder; owner = phone number, or empty for everyone
 async function ingestSong(buf, owner) {
   if (!SD) throw new Error('SONGS_EXT לא הוגדר');
   if (!FFMPEG) throw new Error('ffmpeg לא זמין בשרת');
@@ -1220,7 +1234,6 @@ async function ingestSong(buf, owner) {
   }
 }
 
-// files that were dropped in the songs folder (for example through the Yemot file manager) are cut and replaced by pieces
 let scanning = false;
 const rawFail = {};
 async function scanRaw() {
@@ -1251,7 +1264,6 @@ async function scanRaw() {
 }
 if (SD) { setTimeout(scanRaw, 20000).unref(); setInterval(scanRaw, 600000).unref(); }
 
-// ---------- the page for adding songs ----------
 const songsAuth = req => !!SONGS_PASS && safeEq(String(req.get('x-songs-pass') || ''), SONGS_PASS);
 const SONGS_PAGE = `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>תקיית שירים</title>
 <style>body{font-family:Arial,sans-serif;max-width:560px;margin:24px auto;padding:0 14px;line-height:1.5}label{display:block;margin-top:14px;font-weight:bold}input,button{font-size:16px;padding:8px;width:100%;box-sizing:border-box;margin-top:4px}button{cursor:pointer;margin-top:14px}#msg{margin-top:14px;font-weight:bold}li{margin:6px 0}.d{width:auto;padding:2px 10px;margin:0 8px}</style></head><body>
@@ -1326,7 +1338,7 @@ app.all(['/yemot', '/yemot/:e'], async (req, res) => {
       return res.send('noop=bye');
     }
 
-    const s = calls[id] || (calls[id] = newSession(ext.d, ext.sys, ext.g, { ph: phoneOf(q) }));
+    const s = calls[id] || (calls[id] = newSession(ext.d, ext.sys, ext.g, { ph: phoneOf(q), sourcesOnly: !!ext.sourcesOnly }));
     s.t = Date.now();
 
     // first request of the call: the opening message, then the line waits for typing or for silence (recording)
@@ -1396,8 +1408,6 @@ async function greetFile(d, deadline) {
   }
 }
 
-// asks Gemini to read the given text aloud and stores it as a file in the given extension
-// dir is an extension number such as 5 or 5/2, or empty for the main menu of the line; file is the name without .wav
 let lastRec = 0;
 app.post('/record', async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*').type('text/plain; charset=utf-8');
