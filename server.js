@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { google } = require('googleapis');
 const execFileP = require('util').promisify(require('child_process').execFile);
 // ffmpeg comes from the ffmpeg-static package (no system install needed); without it only mp3/wav files can be played
 const FFMPEG = process.env.FFMPEG_PATH || (() => { try { return require('ffmpeg-static'); } catch (e) { return null; } })();
@@ -14,13 +15,13 @@ const keyList = v => String(v || '').split(',').map(s => s.trim()).filter(Boolea
 const KEYS = keyList(process.env.GEMINI_API_KEYS);
 const TTS_KEYS = keyList(process.env.GEMINI_TTS_KEYS);
 // web search through Groq (browser_search tool of the gpt-oss models); several keys can be given separated by commas
-const GROQ_KEYS = keyList(process.env.GROQ_API_KEYS);
+const GROQ_KEYS = keyList(process.env.GROQ_KEYS);
 const GROQ_BASE = process.env.GROQ_BASE || 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODEL = process.env.GROQ_SEARCH_MODEL || 'openai/gpt-oss-120b';
 const HAS_SEARCH = GROQ_KEYS.length > 0;
 // Jamendo: free music API (full songs, free license); register at developer.jamendo.com for a client id
 const JAMENDO_ID = String(process.env.JAMENDO_CLIENT_ID || '').trim();
-const JAMENDO_BASE = (process.env.JAMENDO_BASE || 'https://api.jamendo.com/v3.0').trim().replace(/\/+$/, '');
+const JAMENDO_BASE = (process.env.JAMENDO_BASE || '                            ').trim().replace(/\/+$/, '');
 // songs can be searched with Jamendo or, as a backup, with the web search of Groq
 const HAS_FOUND = !!JAMENDO_ID || HAS_SEARCH;
 const TEXT_MODEL = String(process.env.TEXT_MODEL || '').trim() || 'gemini-3.6-flash';
@@ -43,6 +44,13 @@ const GBASE = process.env.GEMINI_BASE || 'https://generativelanguage.googleapis.
 const BUDGET = Number(process.env.TURN_BUDGET_MS) || 80000;
 const REC_MAX = String(parseInt(process.env.REC_MAX, 10) || 30);
 
+// Google Drive music folder index & cache
+const DRIVE_KEY = String(process.env.GOOGLE_API_KEY || '').trim();
+const DRIVE_ROOT_ID = String(process.env.DRIVE_MUSIC_FOLDER_ID || '1kG_2bcW35IszXR7j3dXLoAj0T3cadt6f').trim();
+const DRIVE_EXT = String(process.env.DRIVE_MUSIC_EXT || '').replace(/^\/+|\/+$/g, '');
+const DD = /^[0-9]+(\/[0-9]+)*$/.test(DRIVE_EXT) ? '/' + DRIVE_EXT : '';
+const DRIVE_CACHE_MS = Number(process.env.DRIVE_CACHE_MS) || 15 * 60 * 1000;
+
 // Yemot cannot read these characters inside t- text, and , = break the read= syntax
 const sp = s => String(s).replace(/[.\-"'&|,=]/g, ' ').replace(/\s+/g, ' ').trim();
 
@@ -60,7 +68,7 @@ const CHABAD_STRICT_RULES = [
 ].join(' ');
 
 // the user can change the voice or pace by speaking; the model signals it with a tag that the server strips before read-aloud
-const VOICE_CTL = ' אם המשתמש מבקש לשנות את הקול, את קצב הדיבור או את אורך התשובות, התחל את התשובה בתג מתאים ואחריו אשר בקצרה במשפט אחד. התגים: [[VOICE:male]] לקול גברי, [[VOICE:female]] לקול נשי, [[VOICE:default]] לקול הרגיל, [[PACE:slow]] לדיבור לאט, [[PACE:fast]] לדיבור מהר, [[PACE:normal]] לקצב רגיל, [[LEN:short]] כשהמשתמש מבקש תשובות קצרות יותר, למשל: קצר את התשובה, תקצר, תענה קצר, בקצרה, בקיצור, [[LEN:long]] כשהוא מבקש לחזור לתשובות מפורטות או להרחיב. בקשה כזאת מתייחסת תמיד לאורך התשובות שלך ולא לחפץ או לנושא כלשהו, גם כשהיא מופיעה באותו משפט עם שאלה, ואז ענה על השאלה בקצרה. בקשת המשתמש לגבי אורך התשובה גוברת על כל הנחיית אורך אחרת, ולכן כבר בתשובה הזאת עצמה ענה לפי הבקשה החדשה, ואם יש בבקשה גם שאלה ענה עליה. אפשר לשלב כמה תגים. זה היוצא מן הכלל היחיד לכלל הסימנים המיוחדים. השתמש בתגים רק כשהמשתמש ביקש במפורש שינוי כזה, ולעולם אל תזכיר אותם בטקסט אחר.';
+const VOICE_CTL = ' אם המשתמש מבקש לשנות את הקול, את קצב הדיבור או את אורך התשובות, התחל את התשובה בתג מתאים ואחריו אשר בקצרה במשפט אחד. התגים: [[VOICE:male]] לקול גברי, [[VOICE:female]] לקול נשי, [[VOICE:default]] לקול הרגיל, [[PACE:slow]] לדיבור לאט, [[PACE:fast]] לדיבור מהר, [[PACE:normal]] לקצב רגיל, [[LEN:short]] כשהמשתמש מבקש תשובות קצרות יותר, למשל: קצר את התשובה, תקצר, תענה קצר, בקצרה, בקיצור, [[LEN:long]] כשהוא מבקש לחזור לתשובות מפורטות או להרחיב. בקשה כזאת מתייחסת תמיד לאורך התשובות שלך ולא לחפץ או לנושא כלשהו, גם כשהיא מופיעה באותו משפט עם שאלה, ואז ענה על השאלה בקצרה. בקשת המשתמש לגבי אורך התובה גוברת על כל הנחיית אורך אחרת, ולכן כבר בתשובה הזאת עצמה ענה לפי הבקשה החדשה, ואם יש בבקשה גם שאלה ענה עליה. אפשר לשלב כמה תגים. זה היוצא מן הכלל היחיד לכלל הסימנים המיוחדים. השתמש בתגים רק כשהמשתמש ביקש במפורש שינוי כזה, ולעולם אל תזכיר אותם בטקסט אחר.';
 const SEARCH_HINT = ' יש לך כלי חיפוש באינטרנט בשם web_search. הפעל אותו אך ורק אם המשתמש ביקש ממך במפורש לחפש באינטרנט או באתר מסוים, למשל חפש באינטרנט או חפש לי באתר. אם הוא ביקש אתר מסוים, העבר את שמו בשדה site. אם הוא לא ביקש חיפוש במפורש, ענה מהידע שלך בלי להשתמש בכלי, גם אם השאלה עוסקת בחדשות או בעניינים עדכניים ואתה לא בטוח בתשובה, ואז אמור בקצרה שאתה יכול לחפש אם יבקשו. אחרי החיפוש ענה בקצרה בלי להקריא כתובות אתרים.';
 const CHABAD_SEARCH_HINT = ' יש לך כלי חיפוש בשם web_search שמחפש אך ורק במקורות המאושרים של חסידות חב"ד. הפעל אותו עבור כל שאלה או חיפוש מקורות, והסתמך רק על ממצאים מתוך המקורות המאושרים. אם אין ממצא מבוסס במקורות המאושרים, אמור בבירור שאין מקור מאושר לכך ואל תמציא מידע. ציין תמיד את המקור המדויק בתשובה, בלי להקריא כתובות קישור ארוכות.';
 const FOUND_HINT = ' יש לך גם כלי search_media לחיפוש שירים וקבצי שמע ווידאו שאפשר להאזין להם, וכלי play_found להשמעת אחת התוצאות. אם המשתמש ביקש לחפש או לראות שירים או קבצים להשמעה, הפעל search_media עם שאילתה קצרה. אחרי שקיבלת את התוצאות הקרא אותן בקצרה, כל אחת עם מספר במילים ואחריו השם, ושאל איזו לנגן. כשהמשתמש מבקש לנגן אחת מהן, לפי מספר או לפי שם, הפעל play_found עם המספר, ואז אמור משפט קצר אחד שאתה מנגן עכשיו. אל תקריא כתובות.';
@@ -318,6 +326,107 @@ async function prepareMedia(m, d, dl0) {
     for (const x of ['.in', '.wav']) fs.rm(tmp + x, { force: true }, () => {});
   }
 }
+
+// ---------- Google Drive music folder index & playback ----------
+const driveClient = () => DRIVE_KEY ? google.drive({ version: 'v3', auth: DRIVE_KEY }) : null;
+const norm = s => String(s || '').toLowerCase().replace(/\.mp3$/i, '').replace(/[_-]+/g, ' ').replace(/[^\p{L}\p{N}\s]+/gu, ' ').replace(/\s+/g, ' ').trim();
+const cleanTitle = f => String(f || '').replace(/\.mp3$/i, '').replace(/^\d+[\s._-]+/, '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+let driveIndex = { t: 0, tracks: [] };
+async function buildDriveIndex() {
+  const drive = driveClient();
+  if (!drive || !DRIVE_ROOT_ID) return [];
+  const tracks = [];
+  async function walk(folderId, albumPath) {
+    let pageToken;
+    do {
+      const res = await drive.files.list({
+        q: `'${folderId}' in parents and trashed = false`,
+        fields: 'nextPageToken, files(id, name, mimeType)',
+        pageSize: 200,
+        pageToken,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true
+      });
+      const files = (res.data && res.data.files) || [];
+      for (const f of files) {
+        if (f.mimeType === 'application/vnd.google-apps.folder') {
+          await walk(f.id, albumPath ? albumPath + ' / ' + f.name : f.name);
+        } else if (f.mimeType === 'audio/mpeg' || /\.mp3$/i.test(f.name || '')) {
+          tracks.push({
+            id: f.id,
+            fileName: f.name,
+            title: cleanTitle(f.name) || f.name,
+            album: albumPath || 'כללי',
+            normText: norm((albumPath || '') + ' ' + f.name)
+          });
+        }
+      }
+      pageToken = res.data && res.data.nextPageToken;
+    } while (pageToken);
+  }
+  await walk(DRIVE_ROOT_ID, '');
+  driveIndex = { t: Date.now(), tracks };
+  console.log('drive index built:', tracks.length, 'tracks');
+  return tracks;
+}
+
+async function getDriveTracks(force = false) {
+  if (!force && driveIndex.tracks.length && Date.now() - driveIndex.t < DRIVE_CACHE_MS) {
+    return driveIndex.tracks;
+  }
+  return buildDriveIndex();
+}
+
+function searchDriveTracks(tracks, query) {
+  const nq = norm(query);
+  if (!nq) return [];
+  const tokens = nq.split(' ').filter(Boolean);
+  return tracks
+    .map(tr => {
+      let score = 0;
+      if (tr.normText.includes(nq)) score += 10;
+      for (const tok of tokens) {
+        if (tr.normText.includes(tok)) score += 3;
+      }
+      return { tr, score };
+    })
+    .filter(x => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 6)
+    .map(x => x.tr);
+}
+
+async function prepareDriveTrack(tr, targetDir, deadline) {
+  const drive = driveClient();
+  if (!drive) throw new Error('GOOGLE_API_KEY לא מוגדר');
+  const safeName = 'dm' + crypto.createHash('sha1').update(tr.id).digest('hex').slice(0, 12);
+  const tmpBase = path.join(os.tmpdir(), safeName + '-' + crypto.randomBytes(3).toString('hex'));
+  const inPath = tmpBase + '.mp3';
+  const wavPath = tmpBase + '.wav';
+  try {
+    const streamRes = await drive.files.get({ fileId: tr.id, alt: 'media', supportsAllDrives: true }, { responseType: 'stream' });
+    await new Promise((resolve, reject) => {
+      const out = fs.createWriteStream(inPath);
+      streamRes.data.on('error', reject);
+      out.on('error', reject);
+      out.on('finish', resolve);
+      streamRes.data.pipe(out);
+    });
+    let buf;
+    if (FFMPEG) {
+      await execFileP(FFMPEG, ['-y', '-v', 'error', '-i', inPath, '-vn', '-t', String(MEDIA_MAX_SEC), '-ar', '8000', '-ac', '1', '-c:a', 'pcm_s16le', '-f', 'wav', wavPath], { timeout: Math.max(5000, deadline - Date.now()) });
+      buf = fs.readFileSync(wavPath);
+    } else {
+      buf = fs.readFileSync(inPath);
+    }
+    await upload(safeName, buf, deadline, targetDir, 60000);
+    return safeName;
+  } finally {
+    for (const ext of ['.mp3', '.wav']) fs.rm(tmpBase + ext, { force: true }, () => {});
+  }
+}
+
 // ---------- songs and files found on the web: "search for new songs", then "play number 2" ----------
 const FOUND_SEARCH_DECL = {
   name: 'search_media',
@@ -1323,6 +1432,109 @@ app.post('/songs/delete', async (req, res) => {
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: String(e.message).slice(0, 200) });
+  }
+});
+
+// dedicated extension for requesting songs or albums from Google Drive: https://<service>/drive-music
+app.all('/drive-music', async (req, res) => {
+  const q = { ...req.query, ...req.body };
+  const id = idOf(q);
+  res.type('text/plain');
+  const deadline = Date.now() + 75000;
+  const targetDir = DD || EXTP;
+  try {
+    if (q.hangup === 'yes') {
+      endCall(id);
+      return res.send('noop=bye');
+    }
+    if (!DRIVE_KEY) return res.send('id_list_message=t-' + sp('מפתח גוגל דרייב לא הוגדר'));
+
+    const s = calls[id] || (calls[id] = newSession(targetDir, '', '', { dmStage: 'init', dmMatches: [], dmLastFile: '' }));
+    s.t = Date.now();
+
+    if (s.dmStage === 'init') {
+      await getDriveTracks().catch(() => []);
+      s.dmStage = 'ask';
+      s.n++;
+      s.p = 'DM' + s.e + s.n;
+      return res.send('read=t-' + sp('שלוחת שירים מדרייב. אמור שם שיר או אלבום ולאחר מכן הקש סולמית') + '=' + s.p + ',no,record,' + targetDir + ',dm' + s.e + s.n + ',no,,,1,' + REC_MAX);
+    }
+
+    if (s.dmStage === 'ask') {
+      const recName = 'dm' + s.e + s.n;
+      if (!q[s.p]) {
+        s.n++;
+        s.p = 'DM' + s.e + s.n;
+        return res.send('read=t-' + sp('לא שמעתי. אמור שם שיר או אלבום והקש סולמית') + '=' + s.p + ',no,record,' + targetDir + ',dm' + s.e + s.n + ',no,,,1,' + REC_MAX);
+      }
+      const audio = await download(recName, deadline, targetDir);
+      del(recName, targetDir);
+      const trAns = await textGen({
+        contents: [{
+          role: 'user',
+          parts: [
+            { inlineData: { mimeType: 'audio/wav', data: audio.toString('base64') } },
+            { text: 'תמלל את בקשת השיר או האלבום בעברית בלבד, בקצרה, בלי סימני פיסוק ובלי הסברים.' }
+          ]
+        }]
+      }, deadline);
+      const queryText = ((((trAns.candidates || [])[0] || {}).content || {}).parts || [])
+        .filter(p => !p.thought).map(p => p.text || '').join('').trim();
+      const tracks = await getDriveTracks();
+      const matches = searchDriveTracks(tracks, queryText);
+      if (!matches.length) {
+        s.n++;
+        s.p = 'DM' + s.e + s.n;
+        return res.send('read=t-' + sp('לא נמצא שיר מתאים. נסה שוב ואמור שם שיר או אלבום') + '=' + s.p + ',no,record,' + targetDir + ',dm' + s.e + s.n + ',no,,,1,' + REC_MAX);
+      }
+      if (matches.length === 1) {
+        const chosen = matches[0];
+        const fileName = await prepareDriveTrack(chosen, targetDir, deadline);
+        s.dmLastFile = fileName;
+        s.dmStage = 'again';
+        s.n++;
+        s.p = 'DMA' + s.e + s.n;
+        return res.send('read=t-' + sp('מנגן את ' + chosen.title) + '.f-' + targetDir + '/' + fileName + '.t-' + sp('לחיפוש נוסף הקש 1 ליציאה הקש 2') + '=' + s.p + ',no,1,1,7,No');
+      }
+      s.dmMatches = matches;
+      s.dmStage = 'pick';
+      const opts = matches.map((m, idx) => (idx + 1) + ' ' + sp(m.title)).join(' ');
+      s.n++;
+      s.p = 'DMP' + s.e + s.n;
+      return res.send('read=t-' + sp('נמצאו כמה אפשרויות. ' + opts + '. הקש את המספר לבחירה') + '=' + s.p + ',no,1,1,8,No');
+    }
+
+    if (s.dmStage === 'pick') {
+      const idx = parseInt(String(q[s.p] || '').trim(), 10) - 1;
+      const chosen = s.dmMatches[idx];
+      if (!chosen) {
+        s.n++;
+        s.p = 'DMP' + s.e + s.n;
+        return res.send('read=t-' + sp('בחירה לא תקינה. נסה שוב') + '=' + s.p + ',no,1,1,8,No');
+      }
+      const fileName = await prepareDriveTrack(chosen, targetDir, deadline);
+      s.dmLastFile = fileName;
+      s.dmStage = 'again';
+      s.n++;
+      s.p = 'DMA' + s.e + s.n;
+      return res.send('read=t-' + sp('מנגן את ' + chosen.title) + '.f-' + targetDir + '/' + fileName + '.t-' + sp('לחיפוש נוסף הקש 1 ליציאה הקש 2') + '=' + s.p + ',no,1,1,7,No');
+    }
+
+    if (s.dmStage === 'again') {
+      const d = String(q[s.p] || '').trim();
+      if (d === '1') {
+        s.dmStage = 'ask';
+        s.n++;
+        s.p = 'DM' + s.e + s.n;
+        return res.send('read=t-' + sp('אמור שם שיר או אלבום והקש סולמית') + '=' + s.p + ',no,record,' + targetDir + ',dm' + s.e + s.n + ',no,,,1,' + REC_MAX);
+      }
+      return res.send('id_list_message=t-' + sp('להתראות'));
+    }
+
+    return res.send('id_list_message=t-' + ERR);
+  } catch (e) {
+    console.error(id, 'drive-music error:', e.message);
+    return res.send('id_list_message=t-' + ERR);
   }
 });
 
